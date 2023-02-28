@@ -443,7 +443,7 @@ void invokeOneOrTwoShotAllReduceKernel(AllReduceParams<T>& param, cudaStream_t s
 template<typename T>
 class CustomAllReduceComm {
 public:
-    CustomAllReduceComm(size_t rank_size, size_t rank){
+    CustomAllReduceComm(size_t rank_size, size_t rank): rank_size_(rank_size), rank_(rank){
         param_.barrier_flag = 0;
         // NOTE: assume All Reduce happens within the node (DGX A100)
         param_.rank       = rank_;
@@ -475,7 +475,8 @@ public:
 
     void allocateAndExchangePeerAccessPointer(
         std::vector<std::shared_ptr<CustomAllReduceComm>>* custom_all_reduce_comms){
-            assert(custom_all_reduce_comms->size() == rank_size_);
+        printf("size is: %ld \n", custom_all_reduce_comms->size()); 
+        assert(custom_all_reduce_comms->size() == rank_size_);
         assert(rank_ == 0);
         // Enable Peer to Peer Access
         enableP2P(rank_size_);
@@ -606,7 +607,8 @@ void initCustomAllReduceComm(std::vector<std::shared_ptr<CustomAllReduceComm<T>>
 template<typename T>
 void test(){
     int num_gpu = 8; 
-    size_t elem_num = 1024; 
+    int mem_size = 32; // MB
+    size_t elem_num = (mem_size / sizeof(T)) * 1024 * 1024; 
     std::vector<cudaStream_t> stream_vec{}; 
     for(int i = 0; i < num_gpu; i++){
         cudaSetDevice(i); 
@@ -615,9 +617,10 @@ void test(){
         stream_vec.push_back(stream); 
     }
 
-    std::vector<std::shared_ptr<CustomAllReduceComm<T>>> custom_all_reduce_comms; 
+    std::vector<std::shared_ptr<CustomAllReduceComm<T>>> custom_all_reduce_comms{}; 
 
     initCustomAllReduceComm<T>(&custom_all_reduce_comms, true/*enable_custom_all_reduce*/, num_gpu); 
+    printf("Init end\n"); 
 
     std::vector<T*> data_vec{}; 
     for(int i = 0; i < num_gpu; i++){
@@ -626,13 +629,17 @@ void test(){
         cudaMalloc(&x, sizeof(T) * elem_num); 
         data_vec.push_back(x); 
     }
+    printf("Malloc end\n"); 
 
     for(int i = 0; i < num_gpu; i++){
         cudaSetDevice(i); 
         custom_all_reduce_comms[i]->swapInternalBuffer(data_vec[i], elem_num); 
     }
+    printf("swap buffer end\n"); 
+
 
     for(int i = 0; i < num_gpu; i++){
+        cudaSetDevice(i); 
         custom_all_reduce_comms[i]->customAllReduce(elem_num, stream_vec[i]); 
     }
 
